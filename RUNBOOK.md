@@ -6,6 +6,19 @@ Everything here assumes the ssh alias exists (`intertubin pods ssh
 
 ## Set up a fresh pod (the whole thing)
 
+The chart already clones this repo and runs bootstrap at every boot; the
+ONLY manual step left is delivering the secrets (they are gitignored, so
+the clone never carries them):
+
+```bash
+rsync ~/Documents/dotfiles/env.secrets POD:/root/dotfiles/env.secrets
+ssh POD '/root/dotfiles/bootstrap.sh'   # or just wait for the next boot
+```
+
+Once per pod: ~/.git-credentials lands in /root (JuiceFS) and survives
+recreation and node moves. Full-folder rsync still works for pods whose
+chart predates the auto-clone:
+
 ```bash
 rsync -av ~/Documents/dotfiles/ POD:/root/dotfiles/
 ssh POD 'cd /root/dotfiles && ./bootstrap.sh'

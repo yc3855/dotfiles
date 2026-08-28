@@ -31,10 +31,15 @@ if ! command -v hf >/dev/null 2>&1 && ! command -v huggingface-cli >/dev/null 2>
   uv tool install -q "huggingface_hub[cli]" || log "hf install failed"
 fi
 
-if ! command -v claude >/dev/null 2>&1; then
+if ! command -v claude >/dev/null 2>&1 && [ ! -x ~/.local/bin/claude ]; then
   log "installing Claude Code"
-  curl -fsSL https://claude.ai/install.sh | bash || log "claude install failed"
+  # claude.ai 403s from some cluster egress IPs (ali-apse7, 2026-08-28);
+  # code.claude.com serves the same installer and answers everywhere.
+  curl -fsSL https://code.claude.com/install.sh | bash     || curl -fsSL https://claude.ai/install.sh | bash     || log "claude install failed"
 fi
+# The native installer drops the binary in ~/.local/bin but does not wire
+# PATH into bashrc; do it here (uv needs it too).
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc 2>/dev/null   || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 
 if [ ! -d ~/.fzf ]; then
   log "installing fzf"
