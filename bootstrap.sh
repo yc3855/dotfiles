@@ -41,12 +41,37 @@ fi
 # PATH into bashrc; do it here (uv needs it too).
 grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc 2>/dev/null   || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 
+# --- Claude Code status line (same script as the laptop; copied every run) ---
+# Needs jq. Debian images usually lack it; apt first, static binary as fallback.
+if ! command -v jq >/dev/null 2>&1; then
+  log "installing jq"
+  (apt-get install -y -qq jq >/dev/null 2>&1) \
+    || (mkdir -p ~/.local/bin && curl -fsSL -o ~/.local/bin/jq https://github.com/jqlang/jq/releases/latest/download/jq-linux-amd64 \
+        && chmod +x ~/.local/bin/jq) \
+    || log "jq install failed (status line will show 'jq missing')"
+fi
+mkdir -p ~/.claude
+cp claude/statusline-command.sh ~/.claude/statusline-command.sh
+chmod +x ~/.claude/statusline-command.sh
+# Merge only the statusLine key; leave whatever else settings.json holds.
+if command -v jq >/dev/null 2>&1; then
+  [ -s ~/.claude/settings.json ] || echo '{}' > ~/.claude/settings.json
+  jq '.statusLine = {type:"command", command:"bash ~/.claude/statusline-command.sh"}' \
+    ~/.claude/settings.json > ~/.claude/settings.json.tmp \
+    && mv ~/.claude/settings.json.tmp ~/.claude/settings.json \
+    || log "settings.json merge failed"
+fi
+
 if [ ! -d ~/.fzf ]; then
   log "installing fzf"
   git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf \
     && ~/.fzf/install --key-bindings --completion --no-update-rc --no-zsh --no-fish \
     || log "fzf install failed"
 fi
+# The generated .fzf.bash APPENDS ~/.fzf/bin to PATH, so an older fzf in
+# the image (debian 0.44 has no --bash flag) shadows the fresh one and
+# `eval "$(fzf --bash)"` errors on every shell. Prepend instead.
+[ -f ~/.fzf.bash ] && sed -i 's|PATH="${PATH:+${PATH}:}\(.*/\.fzf/bin\)"|PATH="\1${PATH:+:${PATH}}"|' ~/.fzf.bash
 grep -qxF '[ -f ~/.fzf.bash ] && source ~/.fzf.bash' ~/.bashrc 2>/dev/null \
   || echo '[ -f ~/.fzf.bash ] && source ~/.fzf.bash' >> ~/.bashrc
 
@@ -62,12 +87,24 @@ if [ -f ~/.env ]; then
     grep -q "x-access-token" ~/.git-credentials 2>/dev/null \
       || echo "https://x-access-token:${GITHUB_TOKEN}@github.com" >> ~/.git-credentials
   fi
+  # Hugging Face: write the token where every HF library looks
+  # ($HF_HOME/token, default ~/.cache/huggingface/token) rather than
+  # relying on the env var, so `hf download`, transformers and vllm all
+  # see it in ssh shells, kubectl exec and inside docker-compose alike.
+  # Gated repos (Llama, some Qwen) 401 without it; ungated ones work, so
+  # the failure only shows up on the model you actually wanted.
+  if [ -n "${HF_TOKEN:-}" ]; then
+    hf_home="${HF_HOME:-$HOME/.cache/huggingface}"
+    mkdir -p "$hf_home"
+    printf '%s' "$HF_TOKEN" > "$hf_home/token"
+    chmod 600 "$hf_home/token"
+  fi
   if [ -n "${DOCKERHUB_TOKEN:-}" ] && command -v docker >/dev/null 2>&1; then
     echo "$DOCKERHUB_TOKEN" | docker login -u "${DOCKERHUB_USER:-}" --password-stdin \
       >/dev/null 2>&1 || log "docker login failed (daemon not up yet?)"
   fi
 else
-  log "no ~/.env — skipping GitHub/Docker logins (rsync env.secrets over when needed)"
+  log "no ~/.env — skipping GitHub/HF/Docker logins (rsync env.secrets over when needed)"
 fi
 
 log "done"
